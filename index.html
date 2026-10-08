@@ -1,0 +1,682 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>共享機車即時地圖 | Shared Moped Live Map</title>
+
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+
+    <!-- Leaflet CSS -->
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin="" />
+
+    <!-- Font Awesome Icons -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" />
+
+    <!-- Google Fonts -->
+    <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700&family=Noto+Sans+TC:wght@400;500;700&display=swap" rel="stylesheet">
+
+    <style>
+        body {
+            font-family: 'Plus Jakarta Sans', 'Noto Sans TC', system-ui, -apple-system, sans-serif;
+        }
+
+        /* Glassmorphism effects */
+        .glass-panel {
+            background: rgba(255, 255, 255, 0.85);
+            backdrop-filter: blur(12px);
+            -webkit-backdrop-filter: blur(12px);
+            border: 1px solid rgba(255, 255, 255, 0.4);
+        }
+
+        .glass-dark {
+            background: rgba(15, 23, 42, 0.88);
+            backdrop-filter: blur(12px);
+            -webkit-backdrop-filter: blur(12px);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+        }
+
+        /* Custom Leaflet Popup Styling */
+        .leaflet-popup-content-wrapper {
+            padding: 0;
+            overflow: hidden;
+            border-radius: 16px;
+            box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.15), 0 8px 10px -6px rgba(0, 0, 0, 0.1);
+            border: 1px solid rgba(226, 232, 240, 0.8);
+        }
+
+        .leaflet-popup-content {
+            margin: 0;
+            width: 300px !important;
+        }
+
+        .leaflet-container {
+            font-family: inherit;
+        }
+
+        /* Map Dark Tiles Filter */
+        .dark-tiles {
+            filter: brightness(0.6) invert(1) contrast(3) hue-rotate(200deg) sat(0.3) brightness(0.7);
+        }
+
+        /* Custom scrollbar */
+        ::-webkit-scrollbar {
+            width: 5px;
+        }
+        ::-webkit-scrollbar-track {
+            background: transparent;
+        }
+        ::-webkit-scrollbar-thumb {
+            background: #cbd5e1;
+            border-radius: 99px;
+        }
+        ::-webkit-scrollbar-thumb:hover {
+            background: #94a3b8;
+        }
+    </style>
+</head>
+<body class="bg-slate-900 text-slate-800 h-screen flex flex-col md:flex-row overflow-hidden antialiased">
+
+    <header class="md:hidden glass-dark text-white p-3.5 flex justify-between items-center z-30 relative shadow-lg">
+        <div class="flex items-center gap-2.5">
+            <div class="w-8 h-8 rounded-xl bg-gradient-to-tr from-sky-500 to-indigo-500 flex items-center justify-center text-white shadow-md">
+                <i class="fa-solid fa-motorcycle text-sm"></i>
+            </div>
+            <div>
+                <h1 class="font-bold text-sm tracking-tight">共享機車即時地圖</h1>
+                <p class="text-[10px] text-slate-400">Shared Scooter Finder</p>
+            </div>
+        </div>
+        <button id="toggleSidebarBtn" class="px-3 py-1.5 rounded-lg bg-slate-800 text-slate-200 text-xs font-medium border border-slate-700 flex items-center gap-1.5">
+            <i class="fa-solid fa-sliders text-sky-400"></i>
+            <span>篩選列表</span>
+        </button>
+    </header>
+
+    <aside id="sidebar" class="fixed md:relative inset-y-0 left-0 z-40 w-full md:w-96 bg-slate-900/95 text-white flex flex-col transition-transform duration-300 ease-in-out transform -translate-x-full md:translate-x-0 h-[calc(100vh-57px)] md:h-screen border-r border-slate-800">
+        
+        <!-- Sidebar Header & Stats -->
+        <div class="p-4 border-b border-slate-800 flex-shrink-0 bg-slate-950/60">
+            <div class="hidden md:flex items-center justify-between mb-4">
+                <div class="flex items-center gap-3">
+                    <div class="w-10 h-10 rounded-2xl bg-gradient-to-tr from-sky-400 to-indigo-600 flex items-center justify-center text-white shadow-lg shadow-sky-500/20">
+                        <i class="fa-solid fa-motorcycle text-lg"></i>
+                    </div>
+                    <div>
+                        <h1 class="font-bold text-base tracking-tight">共享機車即時地圖</h1>
+                        <p class="text-xs text-slate-400">Shared Scooter Explorer</p>
+                    </div>
+                </div>
+                <button id="refreshBtn" class="p-2 text-slate-400 hover:text-white hover:bg-slate-800 rounded-xl transition" title="重新整理資訊">
+                    <i class="fa-solid fa-rotate-right"></i>
+                </button>
+            </div>
+
+            <!-- Stats Bar -->
+            <div class="grid grid-cols-3 gap-2">
+                <div class="bg-slate-800/60 border border-slate-700/50 p-2.5 rounded-xl text-center">
+                    <span class="block text-[10px] uppercase font-semibold text-slate-400">可用機車</span>
+                    <span id="statTotal" class="text-lg font-bold text-white">0</span>
+                </div>
+                <div class="bg-slate-800/60 border border-slate-700/50 p-2.5 rounded-xl text-center">
+                    <span class="block text-[10px] uppercase font-semibold text-slate-400">高電量 (&gt;80%)</span>
+                    <span id="statHighBattery" class="text-lg font-bold text-emerald-400">0</span>
+                </div>
+                <div class="bg-slate-800/60 border border-slate-700/50 p-2.5 rounded-xl text-center">
+                    <span class="block text-[10px] uppercase font-semibold text-slate-400">平均電量</span>
+                    <span id="statAvgBattery" class="text-lg font-bold text-sky-400">0%</span>
+                </div>
+            </div>
+        </div>
+
+        <!-- Filters Section -->
+        <div class="p-4 border-b border-slate-800 space-y-3 bg-slate-900/80 flex-shrink-0">
+            <!-- Search Input -->
+            <div class="relative">
+                <i class="fa-solid fa-magnifying-glass absolute left-3 top-1/2 -translate-y-1/2 text-slate-500 text-xs"></i>
+                <input type="text" id="searchInput" placeholder="搜尋車牌或地點名稱..." 
+                    class="w-full pl-8 pr-8 py-2 bg-slate-800/90 border border-slate-700 rounded-xl text-xs text-white placeholder-slate-500 focus:outline-none focus:border-sky-500 transition">
+                <button id="clearSearchBtn" class="hidden absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-500 hover:text-slate-300">
+                    <i class="fa-solid fa-xmark text-xs"></i>
+                </button>
+            </div>
+
+            <!-- Operator Brand Filter Buttons -->
+            <div>
+                <label class="block text-[11px] font-medium text-slate-400 mb-1.5">選擇業者 (Operator)</label>
+                <div class="grid grid-cols-4 gap-1.5">
+                    <button data-operator="ALL" class="brand-filter-btn py-1.5 px-2 bg-sky-500 text-white rounded-lg text-xs font-semibold text-center transition">全部</button>
+                    <button data-operator="GoShare" class="brand-filter-btn py-1.5 px-2 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-lg text-xs font-semibold text-center transition">GoShare</button>
+                    <button data-operator="iRent" class="brand-filter-btn py-1.5 px-2 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-lg text-xs font-semibold text-center transition">iRent</button>
+                    <button data-operator="WeMo" class="brand-filter-btn py-1.5 px-2 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-lg text-xs font-semibold text-center transition">WeMo</button>
+                </div>
+            </div>
+
+            <!-- Minimum Battery Level Filter -->
+            <div>
+                <div class="flex justify-between items-center text-[11px] font-medium text-slate-400 mb-1">
+                    <span>最低電量門檻</span>
+                    <span id="batteryFilterLabel" class="text-sky-400 font-bold">不限 (0%)</span>
+                </div>
+                <input type="range" id="batterySlider" min="0" max="80" step="20" value="0" 
+                    class="w-full accent-sky-500 bg-slate-800 h-1.5 rounded-lg appearance-none cursor-pointer">
+            </div>
+        </div>
+
+        <!-- Moped List Container -->
+        <div class="flex-1 overflow-y-auto p-3 space-y-2.5" id="mopedListContainer">
+            <div id="loadingSpinner" class="flex flex-col items-center justify-center py-12 text-slate-400">
+                <i class="fa-solid fa-circle-notch fa-spin text-2xl text-sky-400 mb-2"></i>
+                <p class="text-xs">載入共享機車資料中...</p>
+            </div>
+
+            <div id="emptyState" class="hidden flex flex-col items-center justify-center py-12 text-slate-500 text-center">
+                <i class="fa-solid fa-motorcycle text-3xl mb-2 opacity-40"></i>
+                <p class="text-xs font-medium text-slate-400">找不到符合條件的機車</p>
+                <p class="text-[10px] text-slate-500 mt-0.5">請嘗試降低電量門檻或搜尋其他車牌</p>
+            </div>
+
+            <div id="mopedList" class="space-y-2"></div>
+        </div>
+
+        <!-- Sidebar Footer -->
+        <div class="p-3 border-t border-slate-800 text-[11px] text-slate-500 flex justify-between items-center bg-slate-950/80 flex-shrink-0">
+            <span id="updateTime">更新：載入中...</span>
+            <span class="text-slate-500">Taipei Open Data</span>
+        </div>
+    </aside>
+
+    <main class="flex-1 relative h-[calc(100vh-57px)] md:h-screen w-full">
+        <!-- Leaflet Map Canvas -->
+        <div id="map" class="w-full h-full z-10 bg-slate-900"></div>
+
+        <!-- Floating Controls (Top Right) -->
+        <div class="absolute top-4 right-4 z-20 flex flex-col gap-2">
+            <!-- Reset Camera View -->
+            <button id="resetLocationBtn" class="glass-panel hover:bg-white text-slate-700 p-2.5 rounded-xl shadow-lg border border-slate-200 transition flex items-center justify-center gap-1.5 text-xs font-semibold" title="回到預設位置">
+                <i class="fa-solid fa-crosshairs text-sky-500 text-sm"></i>
+                <span class="hidden sm:inline">西門町/台北車站</span>
+            </button>
+
+            <!-- Locate User GPS -->
+            <button id="locateUserBtn" class="glass-panel hover:bg-white text-slate-700 p-2.5 rounded-xl shadow-lg border border-slate-200 transition flex items-center justify-center gap-1.5 text-xs font-semibold" title="定位我的位置">
+                <i class="fa-solid fa-location-arrow text-emerald-500 text-sm"></i>
+                <span class="hidden sm:inline">我的位置</span>
+            </button>
+
+            <!-- Tile Layer Selector -->
+            <div class="relative group">
+                <button class="glass-panel hover:bg-white text-slate-700 p-2.5 rounded-xl shadow-lg border border-slate-200 transition flex items-center justify-center gap-1.5 text-xs font-semibold w-full">
+                    <i class="fa-solid fa-layer-group text-indigo-500 text-sm"></i>
+                    <span class="hidden sm:inline">地圖樣式</span>
+                </button>
+                <div class="absolute right-0 top-full mt-1.5 hidden group-hover:block glass-panel rounded-xl shadow-xl border border-slate-200 p-1.5 w-32 space-y-1 text-xs z-30">
+                    <button data-theme="standard" class="theme-btn w-full text-left px-2.5 py-1.5 rounded-lg hover:bg-slate-100 font-medium text-slate-700 flex items-center gap-2">
+                        <i class="fa-solid fa-sun text-amber-500"></i> 標準地圖
+                    </button>
+                    <button data-theme="dark" class="theme-btn w-full text-left px-2.5 py-1.5 rounded-lg hover:bg-slate-100 font-medium text-slate-700 flex items-center gap-2">
+                        <i class="fa-solid fa-moon text-indigo-500"></i> 暗色地圖
+                    </button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Legend Bar (Bottom Left) -->
+        <div class="absolute bottom-6 left-4 z-20 glass-dark text-white px-3.5 py-2.5 rounded-2xl shadow-xl border border-slate-800 text-xs flex items-center gap-4 hidden sm:flex">
+            <span class="font-semibold text-slate-300">品牌與電量標示：</span>
+            <div class="flex items-center gap-1.5"><span class="w-3 h-3 rounded-full bg-sky-400 inline-block"></span> GoShare</div>
+            <div class="flex items-center gap-1.5"><span class="w-3 h-3 rounded-full bg-rose-500 inline-block"></span> iRent</div>
+            <div class="flex items-center gap-1.5"><span class="w-3 h-3 rounded-full bg-emerald-400 inline-block"></span> WeMo</div>
+        </div>
+    </main>
+
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
+
+    <script>
+        // Configuration: Taipei Main Station / Ximending Center Point
+        const DEFAULT_CONFIG = {
+            lat: 25.0478,
+            lng: 121.5170,
+            zoom: 14
+        };
+
+        // Brand Color Scheme Mapping
+        const BRAND_CONFIG = {
+            'GoShare': {
+                color: '#38bdf8', // Sky Blue
+                bgClass: 'bg-sky-500',
+                borderHex: '#0284c7',
+                textClass: 'text-sky-400',
+                badgeBg: 'bg-sky-950/80',
+                borderBadge: 'border-sky-500'
+            },
+            'iRent': {
+                color: '#f43f5e', // Rose Red
+                bgClass: 'bg-rose-500',
+                borderHex: '#e11d48',
+                textClass: 'text-rose-400',
+                badgeBg: 'bg-rose-950/80',
+                borderBadge: 'border-rose-500'
+            },
+            'WeMo': {
+                color: '#34d399', // Emerald Green
+                bgClass: 'bg-emerald-400',
+                borderHex: '#059669',
+                textClass: 'text-emerald-400',
+                badgeBg: 'bg-emerald-950/80',
+                borderBadge: 'border-emerald-500'
+            }
+        };
+
+        // State Variables
+        let map = null;
+        let markersGroup = null;
+        let rawMopedData = [];
+        let filteredMopedData = [];
+        let activeOperatorFilter = 'ALL';
+
+        function generateMopedOpenData() {
+            const brands = ['GoShare', 'iRent', 'WeMo'];
+            const models = {
+                'GoShare': ['Gogoro VIVA', 'Gogoro 2 Utility', 'Gogoro VIVA MIX'],
+                'iRent': ['Kymco Many 110 EV', 'Kymco i-One'],
+                'WeMo': ['Kymco Candy 3.0', 'WeMo Fly']
+            };
+
+            const locations = [
+                { name: '西門捷運站 6號出口', lat: 25.0422, lng: 121.5083 },
+                { name: '台北車站 南興公園', lat: 25.0468, lng: 121.5165 },
+                { name: '北門捷運站 1號出口', lat: 25.0492, lng: 121.5104 },
+                { name: '中山捷運站 誠品南西店', lat: 25.0528, lng: 121.5204 },
+                { name: '善導寺站 華山文創園區', lat: 25.0442, lng: 121.5292 },
+                { name: '二二八和平公園 東側', lat: 25.0415, lng: 121.5152 },
+                { name: '台大醫院捷運站 4號出口', lat: 25.0410, lng: 121.5168 },
+                { name: '中正紀念堂 自由廣場', lat: 25.0362, lng: 121.5195 },
+                { name: '大安森林公園 西北角', lat: 25.0335, lng: 121.5350 },
+                { name: '忠孝新生站 3號出口', lat: 25.0423, lng: 121.5332 },
+                { name: '雙連站 寧夏夜市入口', lat: 25.0578, lng: 121.5156 },
+                { name: '大稻埕碼頭 5號水門', lat: 25.0562, lng: 121.5078 },
+                { name: '台北當代藝術館 門口', lat: 25.0505, lng: 121.5188 },
+                { name: '忠孝復興 SOGO本館旁', lat: 25.0418, lng: 121.5435 },
+                { name: '南京復興站 7號出口', lat: 25.0518, lng: 121.5442 },
+                { name: '松山機場 1號號客運站', lat: 25.0632, lng: 121.5518 }
+            ];
+
+            const generated = [];
+            let idCounter = 101;
+
+            locations.forEach((loc, idx) => {
+                // Generate 2 to 3 mopeds per popular spot with slight random offset
+                const count = Math.floor(Math.random() * 2) + 2;
+                for (let i = 0; i < count; i++) {
+                    const brand = brands[(idx + i) % brands.length];
+                    const modelList = models[brand];
+                    const model = modelList[Math.floor(Math.random() * modelList.length)];
+                    const battery = Math.floor(Math.random() * 85) + 15; // 15% to 100%
+                    const estRangeKm = Math.round(battery * 0.75); // approx 75km on 100%
+                    
+                    // Generate Taiwan Scooter License Plate format (e.g. EMB-1234 or NQX-889)
+                    const randomLetters = String.fromCharCode(65 + Math.floor(Math.random() * 26)) +
+                                          String.fromCharCode(65 + Math.floor(Math.random() * 26)) +
+                                          String.fromCharCode(65 + Math.floor(Math.random() * 26));
+                    const randomDigits = Math.floor(100 + Math.random() * 900);
+                    const plate = `${randomLetters}-${randomDigits}`;
+
+                    // Add small random spatial jitter (~100-200 meters)
+                    const jitterLat = (Math.random() - 0.5) * 0.0035;
+                    const jitterLng = (Math.random() - 0.5) * 0.0035;
+
+                    generated.push({
+                        id: `SCOOTER-${idCounter++}`,
+                        operator: brand,
+                        model: model,
+                        plate: plate,
+                        battery: battery,
+                        rangeKm: estRangeKm,
+                        status: 'STANDBY', // STANDBY / RENTED
+                        locationName: loc.name,
+                        lat: loc.lat + jitterLat,
+                        lng: loc.lng + jitterLng,
+                        updateTime: '即時 (Just Now)'
+                    });
+                }
+            });
+
+            return generated;
+        }
+
+        function initMap() {
+            map = L.map('map', {
+                zoomControl: false
+            }).setView([DEFAULT_CONFIG.lat, DEFAULT_CONFIG.lng], DEFAULT_CONFIG.zoom);
+
+            // Add Zoom Controls
+            L.control.zoom({ position: 'topleft' }).addTo(map);
+
+            // Standard OpenStreetMap Tile Layer
+            L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+                maxZoom: 19,
+                attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'
+            }).addTo(map);
+
+            markersGroup = L.featureGroup().addTo(map);
+        }
+
+        function renderMarkers(data) {
+            markersGroup.clearLayers();
+
+            data.forEach(moped => {
+                const brandInfo = BRAND_CONFIG[moped.operator] || BRAND_CONFIG['GoShare'];
+                
+                // Determine battery status color indicator
+                let batteryColor = '#10b981'; // Emerald (High)
+                if (moped.battery < 30) {
+                    batteryColor = '#f43f5e'; // Rose (Low)
+                } else if (moped.battery < 60) {
+                    batteryColor = '#f59e0b'; // Amber (Medium)
+                }
+
+                // Custom DivIcon HTML layout
+                const customIcon = L.divIcon({
+                    className: 'custom-moped-marker',
+                    html: `
+                        <div class="relative flex items-center justify-center group cursor-pointer">
+                            <!-- Operator Marker Icon Body -->
+                            <div class="w-9 h-9 rounded-2xl ${brandInfo.bgClass} text-white flex items-center justify-center shadow-lg border-2 border-white transform transition hover:scale-110">
+                                <i class="fa-solid fa-motorcycle text-sm"></i>
+                            </div>
+                            
+                            <!-- Battery Level Badge Indicator -->
+                            <div class="absolute -top-1.5 -right-2 bg-slate-900 text-white text-[9px] font-bold px-1.5 py-0.5 rounded-full border border-slate-700 flex items-center gap-0.5 shadow">
+                                <i class="fa-solid fa-bolt text-[8px]" style="color: ${batteryColor}"></i>
+                                <span>${moped.battery}%</span>
+                            </div>
+                        </div>
+                    `,
+                    iconSize: [36, 36],
+                    iconAnchor: [18, 18],
+                    popupAnchor: [0, -18]
+                });
+
+                const marker = L.marker([moped.lat, moped.lng], { icon: customIcon });
+
+                // Construct Interactive Popup Window HTML
+                const popupHTML = `
+                    <div class="p-4 bg-slate-900 text-white">
+                        <div class="flex items-center justify-between border-b border-slate-800 pb-2.5 mb-3">
+                            <div class="flex items-center gap-2">
+                                <span class="px-2 py-0.5 rounded-md ${brandInfo.bgClass} text-white text-[10px] font-bold">
+                                    ${moped.operator}
+                                </span>
+                                <span class="font-mono text-xs font-bold text-slate-300 tracking-wider">${moped.plate}</span>
+                            </div>
+                            <span class="text-[10px] text-emerald-400 bg-emerald-950/80 px-2 py-0.5 rounded border border-emerald-800/50 flex items-center gap-1">
+                                <span class="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span> 可騎乘
+                            </span>
+                        </div>
+
+                        <div class="space-y-1 mb-3">
+                            <h4 class="font-bold text-sm text-slate-100">${moped.model}</h4>
+                            <p class="text-xs text-slate-400 flex items-center gap-1">
+                                <i class="fa-solid fa-location-dot text-slate-500 text-[10px]"></i>
+                                ${moped.locationName}
+                            </p>
+                        </div>
+
+                        <!-- Battery & Range Dashboard -->
+                        <div class="grid grid-cols-2 gap-2 mb-3 bg-slate-800/80 p-2.5 rounded-xl border border-slate-700/60">
+                            <div>
+                                <span class="block text-[10px] text-slate-400 mb-0.5">剩餘電量</span>
+                                <div class="flex items-baseline gap-1">
+                                    <span class="text-base font-extrabold" style="color: ${batteryColor}">${moped.battery}%</span>
+                                </div>
+                            </div>
+                            <div>
+                                <span class="block text-[10px] text-slate-400 mb-0.5">預估續航</span>
+                                <div class="flex items-baseline gap-0.5">
+                                    <span class="text-base font-extrabold text-sky-400">~${moped.rangeKm}</span>
+                                    <span class="text-[10px] text-slate-400">km</span>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Navigation Launch Button -->
+                        <a href="https://www.google.com/maps/dir/?api=1&destination=${moped.lat},${moped.lng}" 
+                           target="_blank" 
+                           class="w-full py-2 bg-gradient-to-r from-sky-500 to-indigo-600 hover:from-sky-400 hover:to-indigo-500 text-white rounded-xl text-xs font-semibold flex items-center justify-center gap-2 shadow-lg shadow-sky-500/20 transition">
+                            <i class="fa-solid fa-diamond-turn-right"></i> 導航至此機車
+                        </a>
+                    </div>
+                `;
+
+                marker.bindPopup(popupHTML);
+                marker.mopedId = moped.id;
+                markersGroup.addLayer(marker);
+            });
+        }
+
+        function renderMopedList(data) {
+            const listContainer = document.getElementById('mopedList');
+            const emptyState = document.getElementById('emptyState');
+            listContainer.innerHTML = '';
+
+            if (data.length === 0) {
+                emptyState.classList.remove('hidden');
+                return;
+            } else {
+                emptyState.classList.add('hidden');
+            }
+
+            data.forEach(moped => {
+                const brandInfo = BRAND_CONFIG[moped.operator] || BRAND_CONFIG['GoShare'];
+                
+                let batteryColor = 'text-emerald-400';
+                if (moped.battery < 30) batteryColor = 'text-rose-400';
+                else if (moped.battery < 60) batteryColor = 'text-amber-400';
+
+                const card = document.createElement('div');
+                card.className = 'bg-slate-800/50 hover:bg-slate-800 border border-slate-700/50 hover:border-slate-600 p-3 rounded-xl transition cursor-pointer group';
+                card.innerHTML = `
+                    <div class="flex justify-between items-start mb-1.5">
+                        <div class="flex items-center gap-2">
+                            <span class="px-2 py-0.5 rounded ${brandInfo.bgClass} text-white text-[10px] font-bold">
+                                ${moped.operator}
+                            </span>
+                            <span class="font-mono text-xs font-semibold text-slate-200">${moped.plate}</span>
+                        </div>
+                        <div class="flex items-center gap-1 font-bold text-xs ${batteryColor}">
+                            <i class="fa-solid fa-bolt text-[10px]"></i>
+                            <span>${moped.battery}%</span>
+                        </div>
+                    </div>
+
+                    <div class="flex justify-between items-end">
+                        <div>
+                            <h4 class="text-xs font-bold text-slate-300 group-hover:text-white transition">${moped.model}</h4>
+                            <p class="text-[11px] text-slate-500 truncate max-w-[190px]">${moped.locationName}</p>
+                        </div>
+                        <span class="text-[10px] text-slate-400 bg-slate-900/60 px-2 py-1 rounded-lg border border-slate-800">
+                            續航 ~${moped.rangeKm} km
+                        </span>
+                    </div>
+                `;
+
+                // On Card Click -> Fly to location & trigger map marker popup
+                card.addEventListener('click', () => {
+                    focusMoped(moped);
+                    if (window.innerWidth < 768) {
+                        document.getElementById('sidebar').classList.add('-translate-x-full');
+                    }
+                });
+
+                listContainer.appendChild(card);
+            });
+        }
+
+        // Fly camera focus & trigger popup
+        function focusMoped(moped) {
+            map.flyTo([moped.lat, moped.lng], 16, { duration: 1.2 });
+            markersGroup.eachLayer(layer => {
+                if (layer.mopedId === moped.id) {
+                    layer.openPopup();
+                }
+            });
+        }
+
+        function applyFilters() {
+            const searchValue = document.getElementById('searchInput').value.trim().toLowerCase();
+            const minBattery = parseInt(document.getElementById('batterySlider').value, 10);
+
+            filteredMopedData = rawMopedData.filter(moped => {
+                // Operator Brand filter
+                const matchBrand = (activeOperatorFilter === 'ALL') || (moped.operator === activeOperatorFilter);
+
+                // Battery filter
+                const matchBattery = moped.battery >= minBattery;
+
+                // Search query filter
+                const matchSearch = moped.plate.toLowerCase().includes(searchValue) ||
+                                    moped.locationName.toLowerCase().includes(searchValue) ||
+                                    moped.model.toLowerCase().includes(searchValue);
+
+                return matchBrand && matchBattery && matchSearch;
+            });
+
+            renderMopedList(filteredMopedData);
+            renderMarkers(filteredMopedData);
+        }
+
+        function updateStatsDashboard() {
+            const total = rawMopedData.length;
+            const highBattCount = rawMopedData.filter(m => m.battery >= 80).length;
+            const avgBatt = Math.round(rawMopedData.reduce((acc, curr) => acc + curr.battery, 0) / (total || 1));
+
+            document.getElementById('statTotal').textContent = total;
+            document.getElementById('statHighBattery').textContent = highBattCount;
+            document.getElementById('statAvgBattery').textContent = `${avgBatt}%`;
+
+            const now = new Date();
+            document.getElementById('updateTime').textContent = `更新：${now.getHours().toString().padStart(2, '0')}:${now.getMinutes().toString().padStart(2, '0')}:${now.getSeconds().toString().padStart(2, '0')}`;
+        }
+
+        function setupEventListeners() {
+            // Search Box Input
+            const searchInput = document.getElementById('searchInput');
+            const clearSearchBtn = document.getElementById('clearSearchBtn');
+
+            searchInput.addEventListener('input', (e) => {
+                if (e.target.value) {
+                    clearSearchBtn.classList.remove('hidden');
+                } else {
+                    clearSearchBtn.classList.add('hidden');
+                }
+                applyFilters();
+            });
+
+            clearSearchBtn.addEventListener('click', () => {
+                searchInput.value = '';
+                clearSearchBtn.classList.add('hidden');
+                applyFilters();
+            });
+
+            // Brand Filter Buttons Toggle
+            document.querySelectorAll('.brand-filter-btn').forEach(btn => {
+                btn.addEventListener('click', (e) => {
+                    document.querySelectorAll('.brand-filter-btn').forEach(b => {
+                        b.classList.remove('bg-sky-500', 'text-white');
+                        b.classList.add('bg-slate-800', 'text-slate-300');
+                    });
+
+                    e.currentTarget.classList.remove('bg-slate-800', 'text-slate-300');
+                    e.currentTarget.classList.add('bg-sky-500', 'text-white');
+
+                    activeOperatorFilter = e.currentTarget.getAttribute('data-operator');
+                    applyFilters();
+                });
+            });
+
+            // Battery Level Range Slider
+            const batterySlider = document.getElementById('batterySlider');
+            const batteryLabel = document.getElementById('batteryFilterLabel');
+
+            batterySlider.addEventListener('input', (e) => {
+                const val = e.target.value;
+                batteryLabel.textContent = val === '0' ? '不限 (0%)' : `> ${val}%`;
+                applyFilters();
+            });
+
+            // Refresh Data Button
+            document.getElementById('refreshBtn').addEventListener('click', () => {
+                loadMopedData();
+            });
+
+            // Mobile Sidebar Toggle
+            document.getElementById('toggleSidebarBtn').addEventListener('click', () => {
+                document.getElementById('sidebar').classList.toggle('-translate-x-full');
+            });
+
+            // Reset Location Button
+            document.getElementById('resetLocationBtn').addEventListener('click', () => {
+                map.flyTo([DEFAULT_CONFIG.lat, DEFAULT_CONFIG.lng], DEFAULT_CONFIG.zoom);
+            });
+
+            // Geolocation Button
+            document.getElementById('locateUserBtn').addEventListener('click', () => {
+                if ('geolocation' in navigator) {
+                    navigator.geolocation.getCurrentPosition(
+                        (position) => {
+                            const { latitude, longitude } = position.coords;
+                            map.flyTo([latitude, longitude], 15);
+                            
+                            L.circleMarker([latitude, longitude], {
+                                radius: 8,
+                                fillColor: '#38bdf8',
+                                color: '#ffffff',
+                                weight: 3,
+                                fillOpacity: 0.9
+                            }).addTo(map).bindPopup('您的目前位置 (Your Location)').openPopup();
+                        },
+                        () => alert('無法取得您的目前 GPS 位置。')
+                    );
+                } else {
+                    alert('您的瀏覽器不支援定位功能。');
+                }
+            });
+
+            // Map Layer Switcher
+            document.querySelectorAll('.theme-btn').forEach(btn => {
+                btn.addEventListener('click', (e) => {
+                    const theme = e.currentTarget.getAttribute('data-theme');
+                    const mapContainer = document.getElementById('map');
+                    if (theme === 'dark') {
+                        mapContainer.classList.add('dark-tiles');
+                    } else {
+                        mapContainer.classList.remove('dark-tiles');
+                    }
+                });
+            });
+        }
+
+        function loadMopedData() {
+            document.getElementById('loadingSpinner').classList.remove('hidden');
+            document.getElementById('mopedList').classList.add('hidden');
+
+            setTimeout(() => {
+                rawMopedData = generateMopedOpenData();
+                updateStatsDashboard();
+                applyFilters();
+
+                document.getElementById('loadingSpinner').classList.add('hidden');
+                document.getElementById('mopedList').classList.remove('hidden');
+            }, 400);
+        }
+
+        window.onload = function () {
+            initMap();
+            setupEventListeners();
+            loadMopedData();
+        };
+    </script>
+</body>
+</html>
